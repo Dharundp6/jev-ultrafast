@@ -110,6 +110,24 @@ Point a client at it:
 }
 ```
 
+### Hermes Agent
+
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) can load the server through its native MCP client. After running `uv sync --extra mcp` in this checkout, add the absolute server path from the repository root:
+
+```bash
+hermes mcp add jev-ultrafast --command "$PWD/.venv/bin/jev-mcp"
+hermes mcp test jev-ultrafast
+```
+
+Keep credentials in `~/.hermes/.env` so Hermes can pass them to the stdio subprocess:
+
+```dotenv
+TYPESAFE_API_KEY=...
+TEXT_MODEL_API_KEY=...
+```
+
+`TYPESAFE_API_KEY` is required to start a run. `TEXT_MODEL_API_KEY` is only required when a goal needs Jev to type generated text. Start a new Hermes session after adding the server or changing either key.
+
 | Tool | Job |
 | --- | --- |
 | `jev_run` | Pursue one goal until the run stops; returns every step and the final page |
