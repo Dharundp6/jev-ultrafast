@@ -123,9 +123,12 @@ the library makes survives the MCP boundary. [Browser Harness](https://github.co
 ships a separate low-level MCP server for clients that do want to drive the browser directly.
 
 Every run is bounded. `max_actions` tightens the 60-action limit and `timeout_ms` caps wall-clock
-time, defaulting to 120,000; `stopped_reason` names the bound that ended the run. `verified` is
-always `null`, because only an independent check of the returned page decides whether a goal was
-actually met.
+time, defaulting to 120,000; `stopped_reason` names the bound that ended the run. The deadline is
+checked before each decision and again before the action it chose, so an expired run does not
+mutate the page. It starts at the first decision, which leaves tab creation and the first
+observation outside it, matching the measurement boundary in [performance.md](docs/performance.md);
+browser startup is separately bounded at roughly 15 seconds. `verified` is always `null`, because
+only an independent check of the returned page decides whether a goal was actually met.
 
 ## Why it moves
 

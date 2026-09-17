@@ -15,10 +15,11 @@ class Agent:
         if not task:
             raise ValueError("Supply a task")
         # A caller may tighten the standing bounds for one run. It may not raise them.
-        if max_actions is not None and not 0 < max_actions <= MAX_STEPS:
-            raise ValueError(f"max_actions must be between 1 and {MAX_STEPS}")
-        if budget_ms is not None and budget_ms <= 0:
-            raise ValueError("budget_ms must be positive")
+        # Both must be whole numbers: 0.5 would truncate to 0 and silently remove the bound.
+        if max_actions is not None and (type(max_actions) is not int or not 0 < max_actions <= MAX_STEPS):
+            raise ValueError(f"max_actions must be a whole number between 1 and {MAX_STEPS}")
+        if budget_ms is not None and (type(budget_ms) is not int or budget_ms <= 0):
+            raise ValueError("budget_ms must be a positive whole number")
         plan = [task]
         self.pending_text = None
         self.browser = Browser(url)
@@ -56,6 +57,15 @@ class Agent:
             **{k: v for k, v in self.state.items() if k != "browser"},
             "elements": action_space(self.state["page"]["actions"])[0],
         }
+
+    def stop_for_time(self):
+        """Record a time-budget stop without executing anything further."""
+        state = self.state
+        state["decision"] = None
+        state["status"] = "blocked"
+        state["stopped_reason"] = "time_budget"
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        return self.snapshot()
 
     def exhausted(self):
         """True once this run's wall-clock budget is spent."""
@@ -95,6 +105,10 @@ class Agent:
                 self.command("predict", {})
                 if state["status"] in {"done", "blocked"}:
                     return self.snapshot()
+                # The model call itself can outlast the deadline. Discard that decision
+                # rather than let an expired run still mutate the page.
+                if self.exhausted():
+                    return self.stop_for_time()
                 return self.command("act", {"fingerprint": state["page"]["fingerprint"]})
             except StalePage:
                 state["decision"] = None
@@ -107,18 +121,15 @@ class Agent:
                 raise ValueError("Start a demo first")
             if state["started_at"] is None:
                 state["started_at"] = time.perf_counter()
-            # Stop before spending a model call or a browser read, never after.
-            if self.exhausted():
-                state["decision"] = None
-                state["status"] = "blocked"
-                state["stopped_reason"] = "time_budget"
-                state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
-                return self.snapshot()
-            if not state["browser"].fresh(state["page"]):
-                state["page"] = state["browser"].observe(screenshot=self.screenshots)
             state["decision"] = None
+            # A run that already stopped keeps the reason it stopped for.
             if state["status"] in {"done", "blocked"}:
                 raise ValueError("This run has stopped. Start a fresh demo.")
+            # Stop before spending a model call or a browser read, never after.
+            if self.exhausted():
+                return self.stop_for_time()
+            if not state["browser"].fresh(state["page"]):
+                state["page"] = state["browser"].observe(screenshot=self.screenshots)
             if len(state["decisions"]) >= state.get("max_actions", MAX_STEPS) * 2:
                 state["status"] = "blocked"
                 state["stopped_reason"] = "decision_budget"

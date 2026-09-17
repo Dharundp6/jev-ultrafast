@@ -233,3 +233,37 @@ def test_time_budget_stops_a_run_without_spending_a_model_call(monkeypatch):
     assert result["status"] == "blocked" and result["stopped_reason"] == "time_budget"
     assert result["actions"] == 0
     chooser.assert_not_called()
+
+
+def test_an_explicit_zero_timeout_is_not_replaced_by_the_default():
+    """`timeout_ms or DEFAULT` would turn a client's explicit 0 into two minutes."""
+    assert server.budget(None) == server.DEFAULT_BUDGET_MS
+    assert server.budget(0) == 0
+    assert server.budget(5000) == 5000
+
+
+def test_a_zero_timeout_reaches_the_agent_and_is_refused(monkeypatch):
+    monkeypatch.setattr(server, "Agent", loop.Agent)
+    monkeypatch.setattr(loop, "Browser", Mock(side_effect=AssertionError("must not open a tab")))
+    result = call(server.jev_run, url="https://example.test/", goal="Find a book", timeout_ms=0)
+    assert "budget_ms" in result["error"]
+
+
+def test_step_reports_a_budget_stop_with_the_full_summary(monkeypatch):
+    """A budget stop is an outcome, not a lost call: jev_step keeps what jev_run would return."""
+    monkeypatch.setattr(server, "Agent", build)
+    monkeypatch.setattr(loop, "choose", decides("e3"))
+    call(server.jev_start, url="https://example.test/", goal="Find a book", max_actions=1)
+    call(server.jev_step)
+    stopped = call(server.jev_step)
+    assert "1-action" in stopped["error"]
+    assert stopped["status"] == "blocked" and stopped["stopped_reason"] == "action_budget"
+    assert stopped["actions"] == 1 and stopped["page"]["url"] == "https://example.test/"
+
+
+def test_a_successful_step_reports_no_error(monkeypatch):
+    monkeypatch.setattr(server, "Agent", build)
+    monkeypatch.setattr(loop, "choose", decides("e3"))
+    call(server.jev_start, url="https://example.test/", goal="Find a book")
+    assert call(server.jev_step)["error"] is None
+

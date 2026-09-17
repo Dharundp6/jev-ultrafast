@@ -95,6 +95,15 @@ def warnings():
     return ["TEXT_MODEL_API_KEY is unset; this run will stop if the goal requires typing text."]
 
 
+def budget(timeout_ms):
+    """Apply the default only when a client omitted the timeout.
+
+    `timeout_ms or DEFAULT` would turn an explicit 0 into two minutes; passing it through
+    lets Agent reject it, which is what a client that sent 0 needs to hear.
+    """
+    return DEFAULT_BUDGET_MS if timeout_ms is None else timeout_ms
+
+
 def page_view(state):
     """The indexed element table Jev itself observed, plus visible text."""
     page = state["page"]
@@ -138,7 +147,9 @@ def jev_run(url: str, goal: str, max_actions: int | None = None, timeout_ms: int
 
     Jev selects every operation and every element. Name the outcome you want, not the
     controls to use. `max_actions` caps browser actions for this run; `timeout_ms` caps
-    wall-clock time and defaults to 120000.
+    wall-clock time and defaults to 120000. That clock starts at the first decision, so
+    opening the tab and reading the page once sit outside it, as they do in the project's
+    published timings; browser startup is separately bounded at roughly 15 seconds.
 
     `status` is the run's own stopping condition, never proof that the goal succeeded:
     `verified` is always null because only an independent check of the returned page can
@@ -147,7 +158,7 @@ def jev_run(url: str, goal: str, max_actions: int | None = None, timeout_ms: int
     global AGENT
     require_credentials()
     close_agent()
-    AGENT = Agent(url, goal, max_actions=max_actions, budget_ms=timeout_ms or DEFAULT_BUDGET_MS)
+    AGENT = Agent(url, goal, max_actions=max_actions, budget_ms=budget(timeout_ms))
     error = None
     try:
         for _ in AGENT.run():
@@ -163,12 +174,13 @@ def jev_start(url: str, goal: str, max_actions: int | None = None, timeout_ms: i
     """Open a tab on `url` for `goal` and observe it, without deciding anything yet.
 
     Use this when you want to watch the run: call jev_step to advance one decision at a
-    time. Closes any run already open. Budgets match jev_run.
+    time. Closes any run already open. Budgets match jev_run, including the exclusion of
+    tab creation and the first observation from `timeout_ms`.
     """
     global AGENT
     require_credentials()
     close_agent()
-    AGENT = Agent(url, goal, max_actions=max_actions, budget_ms=timeout_ms or DEFAULT_BUDGET_MS)
+    AGENT = Agent(url, goal, max_actions=max_actions, budget_ms=budget(timeout_ms))
     return {**AGENT.summary(), "page": page_view(AGENT.state), "warnings": warnings()}
 
 
@@ -189,9 +201,19 @@ def jev_step():
             "note": "This run has stopped. Start another with jev_start.",
         }
     before = len(agent.state["history"])
-    agent.command("tick")
+    error = None
+    try:
+        agent.command("tick")
+    except (ValueError, RuntimeError) as failure:
+        # A budget stop is an outcome, not a lost call: report it the way jev_run does.
+        error = str(failure)
     result = agent.summary()
-    return {**result, "executed": result["steps"][before:], "page": page_view(agent.state)}
+    return {
+        **result,
+        "executed": result["steps"][before:],
+        "page": page_view(agent.state),
+        "error": error,
+    }
 
 
 @tool

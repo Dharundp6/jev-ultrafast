@@ -322,12 +322,22 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
 
 
 @pytest.mark.parametrize(
-    "bounds", [{"max_actions": 0}, {"max_actions": MAX_STEPS + 1}, {"max_actions": -1}, {"budget_ms": 0}]
+    "bounds",
+    [
+        {"max_actions": 0}, {"max_actions": MAX_STEPS + 1}, {"max_actions": -1}, {"max_actions": 1.5},
+        {"budget_ms": 0}, {"budget_ms": -1}, {"budget_ms": 0.5},
+    ],
 )
-def test_an_invalid_budget_is_rejected_before_a_browser_opens(bounds):
-    """A caller may tighten the standing bounds, never raise them, and never open a tab to find out."""
+def test_an_invalid_budget_is_rejected_before_a_browser_opens(bounds, monkeypatch):
+    """A caller may tighten the standing bounds, never raise them, and never open a tab to find out.
+
+    0.5 matters on its own: truncating it to 0 would silently remove the bound entirely.
+    """
+    browser = Mock()
+    monkeypatch.setattr(loop, "Browser", browser)
     with pytest.raises(ValueError, match="max_actions|budget_ms"):
         loop.Agent("https://example.test/", "Find a book", **bounds)
+    browser.assert_not_called()
 
 
 def test_a_run_stops_at_its_own_action_budget(runner):
@@ -339,7 +349,7 @@ def test_a_run_stops_at_its_own_action_budget(runner):
     with pytest.raises(ValueError, match="2-action"):
         runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert runner.state["stopped_reason"] == "action_budget"
-    assert len(runner.state["history"]) == 2
+    assert len(runner.state["history"]) == 2 and runner.state["browser"].act.call_count == 2
 
 
 def test_a_spent_time_budget_stops_before_the_next_model_call(runner, monkeypatch):
@@ -369,4 +379,31 @@ def test_summary_reports_the_stopping_condition_not_success(runner):
     assert summary["url"] == "https://example.test/"
     # A finished run is not a verified one. Only an independent page check decides that.
     assert summary["verified"] is None
+
+
+def test_a_finished_run_keeps_its_own_stop_reason_when_polled_again(runner):
+    """An expired budget must not overwrite the reason a completed run actually stopped."""
+    runner.state.update(status="done", stopped_reason="model_done", budget_ms=5)
+    runner.state["started_at"] = time.perf_counter() - 1
+    with pytest.raises(ValueError, match="has stopped"):
+        runner.command("predict", {})
+    assert runner.state["status"] == "done" and runner.state["stopped_reason"] == "model_done"
+    runner.state["browser"].observe.assert_not_called()
+
+
+def test_a_deadline_reached_during_the_model_call_discards_the_decision(runner, monkeypatch):
+    """The budget bounds execution, not only the start of a cycle."""
+
+    def outlives_the_budget(*_args):
+        runner.state["started_at"] = time.perf_counter() - 1
+        return decision("e3")
+
+    runner.state["budget_ms"] = 5
+    runner.state["started_at"] = time.perf_counter()
+    monkeypatch.setattr(loop, "choose", outlives_the_budget)
+    runner.command("tick")
+    assert runner.state["status"] == "blocked"
+    assert runner.state["stopped_reason"] == "time_budget"
+    assert runner.state["history"] == []
+    runner.state["browser"].act.assert_not_called()
 
