@@ -10,6 +10,7 @@ import pytest
 from jev_ultrafast import agent as loop
 from jev_ultrafast import model
 from jev_ultrafast.browser import StalePage, browser_operation, fingerprint
+from jev_ultrafast.questions import MAX_STEPS
 
 
 def page():
@@ -318,3 +319,54 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "bounds", [{"max_actions": 0}, {"max_actions": MAX_STEPS + 1}, {"max_actions": -1}, {"budget_ms": 0}]
+)
+def test_an_invalid_budget_is_rejected_before_a_browser_opens(bounds):
+    """A caller may tighten the standing bounds, never raise them, and never open a tab to find out."""
+    with pytest.raises(ValueError, match="max_actions|budget_ms"):
+        loop.Agent("https://example.test/", "Find a book", **bounds)
+
+
+def test_a_run_stops_at_its_own_action_budget(runner):
+    runner.state["max_actions"] = 2
+    for _ in range(2):
+        runner.state["decision"] = decision("e3")
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    runner.state["decision"] = decision("e3")
+    with pytest.raises(ValueError, match="2-action"):
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["stopped_reason"] == "action_budget"
+    assert len(runner.state["history"]) == 2
+
+
+def test_a_spent_time_budget_stops_before_the_next_model_call(runner, monkeypatch):
+    chooser = Mock(side_effect=AssertionError("the budget must be checked before the model call"))
+    monkeypatch.setattr(loop, "choose", chooser)
+    runner.state["budget_ms"] = 5
+    runner.state["started_at"] = time.perf_counter() - 1
+    runner.command("tick")
+    assert runner.state["status"] == "blocked"
+    assert runner.state["stopped_reason"] == "time_budget"
+    assert runner.state["history"] == []
+    chooser.assert_not_called()
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_an_unset_time_budget_never_expires(runner):
+    runner.state["budget_ms"] = None
+    runner.state["started_at"] = time.perf_counter() - 3600
+    assert runner.exhausted() is False
+
+
+def test_summary_reports_the_stopping_condition_not_success(runner):
+    runner.state["decision"] = decision("e3")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    summary = runner.summary()
+    assert summary["actions"] == 1 and summary["steps"][0]["action"] == "Go"
+    assert summary["url"] == "https://example.test/"
+    # A finished run is not a verified one. Only an independent page check decides that.
+    assert summary["verified"] is None
+
