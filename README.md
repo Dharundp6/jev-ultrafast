@@ -119,7 +119,11 @@ hermes mcp add jev-ultrafast --command "$PWD/.venv/bin/jev-mcp"
 hermes mcp test jev-ultrafast
 ```
 
-Keep credentials in `~/.hermes/.env` so Hermes can pass them to the stdio subprocess:
+Run `hermes config env-path` to locate the active profile's environment file, then keep the credentials there so Hermes can pass them to the stdio subprocess:
+
+```bash
+hermes config env-path
+```
 
 ```dotenv
 TYPESAFE_API_KEY=...
