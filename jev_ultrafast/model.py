@@ -186,7 +186,7 @@ def field_text(context):
     )
     try:
         output = json.loads(result["choices"][0]["message"]["content"])
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, IndexError):
         raise ValueError("Text helper returned no valid field value; nothing typed.") from None
     if not isinstance(output, dict) or set(output) != {"text"}:
         raise ValueError("Text helper returned no valid field value; nothing typed.")

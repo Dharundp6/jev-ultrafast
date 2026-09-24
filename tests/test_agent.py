@@ -338,3 +338,11 @@ def test_a_bad_reply_is_not_blamed_on_the_goal(monkeypatch, content):
     with pytest.raises(ValueError, match="nothing typed") as caught:
         model.field_text({"goal": "Find a flight"})
     assert "goal supplies no value" not in str(caught.value)
+
+
+def test_a_reply_with_no_choices_is_not_blamed_on_the_goal(monkeypatch):
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", Mock(return_value={"choices": []}))
+    with pytest.raises(ValueError, match="nothing typed") as caught:
+        model.field_text({"goal": "Find a flight"})
+    assert "goal supplies no value" not in str(caught.value)
