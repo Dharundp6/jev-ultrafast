@@ -20,6 +20,7 @@ import sys
 import threading
 from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError, version
+from urllib.parse import urlparse
 
 try:
     from mcp.server import MCPServer
@@ -88,6 +89,16 @@ def require_credentials():
         )
 
 
+def require_web_url(url):
+    """Refuse anything but a web page before opening a tab.
+
+    The tab shares the user's Chrome profile, so a file:// URL would hand local files back
+    in `page.text`, and other schemes reach browser internals. Nothing a goal needs lives there.
+    """
+    if urlparse(url).scheme.lower() not in {"http", "https"}:
+        raise ValueError("url must be an http:// or https:// address.")
+
+
 def warnings():
     """Flag a missing credential that only some goals need."""
     if os.environ.get("TEXT_MODEL_API_KEY"):
@@ -146,8 +157,10 @@ def jev_run(url: str, goal: str, max_actions: int | None = None, timeout_ms: int
     """Pursue one natural-language goal in a fresh tab until Jev stops, then report what happened.
 
     Jev selects every operation and every element. Name the outcome you want, not the
-    controls to use. `max_actions` caps browser actions for this run; `timeout_ms` caps
-    wall-clock time and defaults to 120000. That clock starts at the first decision, so
+    controls to use. `url` must be http or https. `max_actions` caps browser actions for this
+    run; `timeout_ms` bounds wall-clock time and defaults to 120000. It is checked before each
+    decision and again before the action that decision chose, so a model call already in flight
+    can finish past it; it is not a hard cap. That clock starts at the first decision, so
     opening the tab and reading the page once sit outside it, as they do in the project's
     published timings; browser startup is separately bounded at roughly 15 seconds.
 
@@ -157,6 +170,7 @@ def jev_run(url: str, goal: str, max_actions: int | None = None, timeout_ms: int
     """
     global AGENT
     require_credentials()
+    require_web_url(url)
     close_agent()
     AGENT = Agent(url, goal, max_actions=max_actions, budget_ms=budget(timeout_ms))
     error = None
@@ -179,6 +193,7 @@ def jev_start(url: str, goal: str, max_actions: int | None = None, timeout_ms: i
     """
     global AGENT
     require_credentials()
+    require_web_url(url)
     close_agent()
     AGENT = Agent(url, goal, max_actions=max_actions, budget_ms=budget(timeout_ms))
     return {**AGENT.summary(), "page": page_view(AGENT.state), "warnings": warnings()}

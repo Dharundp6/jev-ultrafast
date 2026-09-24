@@ -121,6 +121,8 @@ Point a client at it:
 arguments at all: the client names an outcome and the policy picks the control, so the guarantee
 the library makes survives the MCP boundary. [Browser Harness](https://github.com/browser-use/browser-harness)
 ships a separate low-level MCP server for clients that do want to drive the browser directly.
+`url` must be `http` or `https`: the tab shares your Chrome profile, so a `file://` address would
+hand local files back to the client.
 
 Every run is bounded. `max_actions` tightens the 60-action limit and `timeout_ms` caps wall-clock
 time, defaulting to 120,000; `stopped_reason` names the bound that ended the run. The deadline is

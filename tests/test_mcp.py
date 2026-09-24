@@ -109,6 +109,27 @@ def test_missing_credential_fails_before_opening_a_browser(monkeypatch):
     built.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "url",
+    ["file:///C:/Users/me/.env", "FILE:///etc/passwd", "chrome://settings", "javascript:alert(1)", "example.test"],
+)
+@pytest.mark.parametrize("tool", ["jev_run", "jev_start"])
+def test_a_non_web_url_is_refused_before_opening_a_tab(monkeypatch, tool, url):
+    """The tab shares the user's Chrome profile, so file:// would read local files back."""
+    built = Mock()
+    monkeypatch.setattr(server, "Agent", built)
+    assert "http" in call(getattr(server, tool), url=url, goal="Find a book")["error"]
+    built.assert_not_called()
+
+
+def test_a_web_url_opens_a_tab(monkeypatch):
+    built = Mock(side_effect=RuntimeError("opened"))
+    monkeypatch.setattr(server, "Agent", built)
+    for url in ("https://example.test/", "HTTP://example.test/"):
+        assert call(server.jev_start, url=url, goal="Find a book")["error"] == "opened"
+    assert built.call_count == 2
+
+
 def test_a_failure_is_returned_as_json_not_raised(monkeypatch):
     monkeypatch.setattr(server, "Agent", Mock(side_effect=RuntimeError("Chrome is not connected")))
     assert call(server.jev_run, url="https://example.test/", goal="Find a book")["error"] == "Chrome is not connected"
